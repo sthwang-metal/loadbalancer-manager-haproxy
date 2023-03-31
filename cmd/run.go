@@ -7,6 +7,8 @@ import (
 	"os/signal"
 	"strings"
 
+	"go.infratographer.com/loadbalancer-manager-haproxy/internal/dataplaneapi"
+	"go.infratographer.com/loadbalancer-manager-haproxy/internal/lbapi"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/pkg"
 
 	"github.com/nats-io/nats.go"
@@ -76,13 +78,16 @@ func run(cmdCtx context.Context, v *viper.Viper) error {
 	defer natsConn.Close()
 
 	// init other components
-	dpc := pkg.NewDataPlaneClient(viper.GetString("dataplane.url"))
+	dpc := dataplaneapi.NewClient(viper.GetString("dataplane.url"))
+	lbc := lbapi.NewClient(viper.GetString("loadbalancerapi.url"))
 
 	mgr := &pkg.ManagerConfig{
 		Context:         ctx,
 		Logger:          logger,
 		NatsConn:        natsConn,
 		DataPlaneClient: dpc,
+		LBClient:        lbc,
+		BaseCfgPath:     viper.GetString("haproxy.config.base"),
 	}
 
 	if err := mgr.Run(); err != nil {
@@ -106,6 +111,10 @@ func validateMandatoryFlags() error {
 
 	if viper.GetString("haproxy.config.base") == "" {
 		errs = append(errs, ErrHAProxyBaseConfigRequired.Error())
+	}
+
+	if viper.GetString("loadbalancerapi.url") == "" {
+		errs = append(errs, ErrLBAPIURLRequired.Error())
 	}
 
 	if len(errs) == 0 {
