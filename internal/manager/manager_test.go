@@ -1,4 +1,4 @@
-package pkg
+package manager
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/lbapi"
-	"go.infratographer.com/loadbalancer-manager-haproxy/internal/pkg/mock"
+	"go.infratographer.com/loadbalancer-manager-haproxy/internal/manager/mock"
 	"go.uber.org/zap"
 )
 
@@ -24,7 +24,7 @@ const (
 func TestMergeConfig(t *testing.T) {
 	MergeConfigTests := []struct {
 		name                string
-		testInput           LoadBalancer
+		testInput           loadBalancer
 		expectedCfgFilename string
 	}{
 		{"ssh service one pool", mergeTestData1, "lb-ex-1-exp.cfg"},
@@ -69,13 +69,13 @@ func TestUpdateConfigToLatest(t *testing.T) {
 			},
 		}
 
-		mgrCfg := ManagerConfig{
+		mgr := Manager{
 			Logger:      logger,
 			LBClient:    mockLBAPI,
 			BaseCfgPath: testBaseCfgPath,
 		}
 
-		err := mgrCfg.updateConfigToLatest("58622a8d-54a2-4b0c-8b5f-8de7dff29f6f")
+		err := mgr.updateConfigToLatest("58622a8d-54a2-4b0c-8b5f-8de7dff29f6f")
 		assert.NotNil(t, err)
 	})
 
@@ -105,13 +105,13 @@ func TestUpdateConfigToLatest(t *testing.T) {
 			},
 		}
 
-		mgrCfg := ManagerConfig{
+		mgr := Manager{
 			Logger:      logger,
 			LBClient:    mockLBAPI,
 			BaseCfgPath: testBaseCfgPath,
 		}
 
-		err := mgrCfg.updateConfigToLatest("58622a8d-54a2-4b0c-8b5f-8de7dff29f6f")
+		err := mgr.updateConfigToLatest("58622a8d-54a2-4b0c-8b5f-8de7dff29f6f")
 		assert.NotNil(t, err)
 	})
 
@@ -124,13 +124,13 @@ func TestUpdateConfigToLatest(t *testing.T) {
 			},
 		}
 
-		mgrCfg := ManagerConfig{
+		mgr := Manager{
 			Logger:          logger,
 			DataPlaneClient: mockDataplaneAPI,
 			BaseCfgPath:     testBaseCfgPath,
 		}
 
-		err := mgrCfg.updateConfigToLatest()
+		err := mgr.updateConfigToLatest()
 		require.Nil(t, err)
 
 		contents, err := os.ReadFile(testBaseCfgPath)
@@ -138,9 +138,9 @@ func TestUpdateConfigToLatest(t *testing.T) {
 
 		// remove that 'unnamed_defaults_1' thing the haproxy parser library puts in the default section,
 		// even though the library is configured to not include default section labels
-		mgrCfg.currentConfig = strings.Replace(mgrCfg.currentConfig, " unnamed_defaults_1", "", -1)
+		mgr.currentConfig = strings.Replace(mgr.currentConfig, " unnamed_defaults_1", "", -1)
 
-		assert.Equal(t, strings.TrimSpace(string(contents)), strings.TrimSpace(mgrCfg.currentConfig))
+		assert.Equal(t, strings.TrimSpace(string(contents)), strings.TrimSpace(mgr.currentConfig))
 	})
 
 	t.Run("successfully queries lb api and merges changes with base config", func(t *testing.T) {
@@ -204,36 +204,36 @@ func TestUpdateConfigToLatest(t *testing.T) {
 			},
 		}
 
-		mgrCfg := ManagerConfig{
+		mgr := Manager{
 			Logger:          logger,
 			LBClient:        mockLBAPI,
 			DataPlaneClient: mockDataplaneAPI,
 			BaseCfgPath:     testBaseCfgPath,
 		}
 
-		err := mgrCfg.updateConfigToLatest("58622a8d-54a2-4b0c-8b5f-8de7dff29f6f")
+		err := mgr.updateConfigToLatest("58622a8d-54a2-4b0c-8b5f-8de7dff29f6f")
 		require.Nil(t, err)
 
 		expCfg, err := os.ReadFile(fmt.Sprintf("%s/%s", testDataBaseDir, "lb-ex-1-exp.cfg"))
 		require.Nil(t, err)
 
-		assert.Equal(t, strings.TrimSpace(string(expCfg)), strings.TrimSpace(mgrCfg.currentConfig))
+		assert.Equal(t, strings.TrimSpace(string(expCfg)), strings.TrimSpace(mgr.currentConfig))
 	})
 }
 
-var mergeTestData1 = LoadBalancer{
+var mergeTestData1 = loadBalancer{
 	ID: "58622a8d-54a2-4b0c-8b5f-8de7dff29f6f",
-	Ports: []Port{
+	Ports: []port{
 		{
 			Name:          "ssh-service",
 			AddressFamily: "ipv4",
 			Port:          22,
 			ID:            "16dd23d7-d3ab-42c8-a645-3169f2659a0b",
-			Pools: []Pool{
+			Pools: []pool{
 				{
 					ID:   "49faa4a3-8d0b-4a7a-8bb9-7ed1b5995e49",
 					Name: "ssh-service-a",
-					Origins: []Origin{
+					Origins: []origin{
 						{
 							ID:        "c0a80101-0000-0000-0000-000000000001",
 							Name:      "svr1-2222",
@@ -262,19 +262,19 @@ var mergeTestData1 = LoadBalancer{
 	},
 }
 
-var mergeTestData2 = LoadBalancer{
+var mergeTestData2 = loadBalancer{
 	ID: "58622a8d-54a2-4b0c-8b5f-8de7dff29f6f",
-	Ports: []Port{
+	Ports: []port{
 		{
 			Name:          "ssh-service",
 			AddressFamily: "ipv4",
 			Port:          22,
 			ID:            "16dd23d7-d3ab-42c8-a645-3169f2659a0b",
-			Pools: []Pool{
+			Pools: []pool{
 				{
 					ID:   "49faa4a3-8d0b-4a7a-8bb9-7ed1b5995e49",
 					Name: "ssh-service-a",
-					Origins: []Origin{
+					Origins: []origin{
 						{
 							ID:        "c0a80101-0000-0000-0000-000000000001",
 							Name:      "svr1-2222",
@@ -301,7 +301,7 @@ var mergeTestData2 = LoadBalancer{
 				{
 					ID:   "c9bd57ac-6d88-4786-849e-0b228c17d645",
 					Name: "ssh-service-b",
-					Origins: []Origin{
+					Origins: []origin{
 						{
 							ID:        "b1982331-0000-0000-0000-000000000001",
 							Name:      "svr1-2222",
@@ -316,19 +316,19 @@ var mergeTestData2 = LoadBalancer{
 	},
 }
 
-var mergeTestData3 = LoadBalancer{
+var mergeTestData3 = loadBalancer{
 	ID: "a522bc95-2a74-4005-919d-6ae0a5be056d",
-	Ports: []Port{
+	Ports: []port{
 		{
 			Name:          "http",
 			AddressFamily: "ipv4",
 			Port:          80,
 			ID:            "16dd23d7-d3ab-42c8-a645-3169f2659a0b",
-			Pools: []Pool{
+			Pools: []pool{
 				{
 					ID:   "49faa4a3-8d0b-4a7a-8bb9-7ed1b5995e49",
 					Name: "ssh-service-a",
-					Origins: []Origin{
+					Origins: []origin{
 						{
 							ID:        "c0a80101-0000-0000-0000-000000000001",
 							Name:      "svr1",
@@ -345,11 +345,11 @@ var mergeTestData3 = LoadBalancer{
 			AddressFamily: "ipv4",
 			Port:          443,
 			ID:            "8ca812cc-9c3d-4fed-95be-40a773f7d876",
-			Pools: []Pool{
+			Pools: []pool{
 				{
 					ID:   "d94ad98b-b074-4794-896f-d71ae3b7b0ac",
 					Name: "ssh-service-a",
-					Origins: []Origin{
+					Origins: []origin{
 						{
 							ID:        "676a1536-0a17-4676-9296-ee957e5871c1",
 							Name:      "svr1",
