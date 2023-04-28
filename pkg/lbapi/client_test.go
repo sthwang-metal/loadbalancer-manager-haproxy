@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.infratographer.com/loadbalancer-manager-haproxy/internal/lbapi/mock"
+	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi/internal/mock"
 )
 
 func newLBAPIMock(respJSON string, respCode int) *mock.HTTPClient {
@@ -18,6 +18,7 @@ func newLBAPIMock(respJSON string, respCode int) *mock.HTTPClient {
 		json := respJSON
 
 		r := io.NopCloser(strings.NewReader(json))
+
 		return &http.Response{
 			StatusCode: respCode,
 			Body:       r,

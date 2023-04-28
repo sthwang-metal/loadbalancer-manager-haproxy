@@ -11,8 +11,8 @@ import (
 	"github.com/haproxytech/config-parser/v4/options"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.infratographer.com/loadbalancer-manager-haproxy/internal/lbapi"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/manager/mock"
+	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
 	"go.uber.org/zap"
 )
 
@@ -58,6 +58,7 @@ func TestMergeConfig(t *testing.T) {
 func TestUpdateConfigToLatest(t *testing.T) {
 	l, err := zap.NewDevelopmentConfig().Build()
 	logger := l.Sugar()
+
 	require.Nil(t, err)
 
 	t.Run("errors on failure to query for loadbalancers/:id", func(t *testing.T) {
@@ -65,7 +66,7 @@ func TestUpdateConfigToLatest(t *testing.T) {
 
 		mockLBAPI := &mock.LBAPIClient{
 			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.LoadBalancerResponse, error) {
-				return nil, fmt.Errorf("failure")
+				return nil, fmt.Errorf("failure") // nolint:goerr113
 			},
 		}
 
@@ -101,7 +102,7 @@ func TestUpdateConfigToLatest(t *testing.T) {
 				}, nil
 			},
 			DoGetPool: func(ctx context.Context, id string) (*lbapi.PoolResponse, error) {
-				return nil, fmt.Errorf("failure")
+				return nil, fmt.Errorf("failure") // nolint:goerr113
 			},
 		}
 
@@ -138,7 +139,7 @@ func TestUpdateConfigToLatest(t *testing.T) {
 
 		// remove that 'unnamed_defaults_1' thing the haproxy parser library puts in the default section,
 		// even though the library is configured to not include default section labels
-		mgr.currentConfig = strings.Replace(mgr.currentConfig, " unnamed_defaults_1", "", -1)
+		mgr.currentConfig = strings.ReplaceAll(mgr.currentConfig, " unnamed_defaults_1", "")
 
 		assert.Equal(t, strings.TrimSpace(string(contents)), strings.TrimSpace(mgr.currentConfig))
 	})

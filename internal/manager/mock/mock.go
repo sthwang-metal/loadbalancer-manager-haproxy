@@ -3,7 +3,7 @@ package mock
 import (
 	"context"
 
-	"go.infratographer.com/loadbalancer-manager-haproxy/internal/lbapi"
+	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
 )
 
 // LBAPIClient mock client
@@ -23,13 +23,13 @@ func (c LBAPIClient) GetPool(ctx context.Context, id string) (*lbapi.PoolRespons
 // DataplaneAPIClient mock client
 type DataplaneAPIClient struct {
 	DoPostConfig func(ctx context.Context, config string) error
-	DoApiIsReady func(ctx context.Context) bool
+	DoAPIIsReady func(ctx context.Context) bool
 }
 
 func (c *DataplaneAPIClient) PostConfig(ctx context.Context, config string) error {
 	return c.DoPostConfig(ctx, config)
 }
 
-func (c DataplaneAPIClient) ApiIsReady(ctx context.Context) bool {
-	return c.DoApiIsReady(ctx)
+func (c DataplaneAPIClient) APIIsReady(ctx context.Context) bool {
+	return c.DoAPIIsReady(ctx)
 }
