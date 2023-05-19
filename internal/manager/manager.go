@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -11,15 +10,12 @@ import (
 	"github.com/haproxytech/config-parser/v4/options"
 	"github.com/haproxytech/config-parser/v4/types"
 	"github.com/nats-io/nats.go"
-	"github.com/spf13/viper"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/dataplaneapi"
 	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
 
+	"go.infratographer.com/x/gidx"
 	"go.infratographer.com/x/pubsubx"
-	"go.infratographer.com/x/urnx"
 	"go.uber.org/zap"
-	"gocloud.dev/pubsub"
-	"gocloud.dev/pubsub/natspubsub"
 )
 
 var (
@@ -37,13 +33,22 @@ type dataPlaneAPI interface {
 	APIIsReady(ctx context.Context) bool
 }
 
+type natsClient interface {
+	Connect() error
+	Listen() error
+	Ack(msg *nats.Msg) error
+	Subscribe(subject string) error
+	Close() error
+}
+
 // Manager contains configuration and client connections
 type Manager struct {
 	Context         context.Context
 	Logger          *zap.SugaredLogger
-	NatsConn        *nats.Conn
+	NatsClient      natsClient
 	DataPlaneClient dataPlaneAPI
 	LBClient        lbAPI
+	ManagedLBID     string
 	BaseCfgPath     string
 
 	// primarily for testing
@@ -52,6 +57,8 @@ type Manager struct {
 
 // Run subscribes to a NATS subject and updates the haproxy config via dataplaneapi
 func (m *Manager) Run() error {
+	m.Logger.Info("Starting manager")
+
 	// wait until the Data Plane API is running
 	if err := m.waitForDataPlaneReady(dataPlaneAPIRetryLimit, dataPlaneAPIRetrySleep); err != nil {
 		m.Logger.Fatal("unable to reach dataplaneapi. is it running?")
@@ -62,60 +69,111 @@ func (m *Manager) Run() error {
 		m.Logger.Errorw("failed to initialize the config", zap.Error(err))
 	}
 
-	// subscribe to nats queue -> update config to latest on msg receive
-	subject := viper.GetString("nats.subject")
-
-	subscription, err := natspubsub.OpenSubscription(m.NatsConn, subject, nil)
-	if err != nil {
-		// TODO - update
-		m.Logger.Errorw("failed to subscribe to queue ", zap.String("subject", subject))
+	// listen for nats messages on subject(s)
+	if err := m.NatsClient.Listen(); err != nil {
 		return err
 	}
 
-	m.Logger.Infow("subscribed to NATS subject ", zap.String("subject", subject))
+	return nil
+}
 
-	defer func() {
-		_ = subscription.Shutdown(m.Context)
-	}()
+const (
+	subjectPrefixLoadBalancer     = "loadbal"
+	subjectPrefixLoadBalancerPort = "loadprt"
 
-	for {
-		msg, err := subscription.Receive(m.Context)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				m.Logger.Info("context canceled")
-				return nil
-			}
+	eventTypeCreate = "create"
+	eventTypeUpdate = "update"
+)
 
-			m.Logger.Error("failed receiving nats message")
-
-			return err
-		}
-
-		_ = m.processMsg(msg)
-
-		// TODO - @rizzza - For now, we ack everything. nack is fatal with this driver.
-		msg.Ack()
+// supportedPrefix returns true if the subject prefix is supported by this manager
+func supportedPrefix(prefix string) bool {
+	switch prefix {
+	case subjectPrefixLoadBalancer:
+		fallthrough
+	case subjectPrefixLoadBalancerPort:
+		return true
+	default:
+		return false
 	}
 }
 
-// processMsg message handler
-func (m Manager) processMsg(msg *pubsub.Message) error {
-	pubsubMsg := pubsubx.Message{}
-	if err := json.Unmarshal(msg.Body, &pubsubMsg); err != nil {
+// getTargetLoadBalancerID returns the loadbalancer id from the message,
+// whether it is the SubjectID, or one of the AdditionalSubjectIds
+func getTargetLoadBalancerID(msg *pubsubx.ChangeMessage) (gidx.PrefixedID, error) {
+	var lbID gidx.PrefixedID
+
+	if msg.SubjectID.Prefix() == subjectPrefixLoadBalancer {
+		lbID = msg.SubjectID
+	} else {
+		for _, subject := range msg.AdditionalSubjectIDs {
+			if subject.Prefix() == subjectPrefixLoadBalancer {
+				lbID = subject
+			}
+		}
+	}
+
+	if lbID.String() == "" {
+		return "", errLoadbalancerIDNotFound
+	}
+
+	// check if a valid gidx
+	lbID, err := gidx.Parse(lbID.String())
+	if err != nil {
+		return "", err
+	}
+
+	return lbID, nil
+}
+
+// ProcessMsg message handler
+func (m Manager) ProcessMsg(msg *nats.Msg) error {
+	pubsubMsg := pubsubx.ChangeMessage{}
+	if err := json.Unmarshal(msg.Data, &pubsubMsg); err != nil {
 		m.Logger.Errorw("failed to process data in msg", zap.Error(err))
 		return err
 	}
 
-	urn, err := urnx.Parse(pubsubMsg.SubjectURN)
-	if err != nil {
-		m.Logger.Errorw("failed to parse pubsub msg urn", zap.String("subjectURN", pubsubMsg.SubjectURN), zap.Error(err))
-		return err
+	subjectPrefix := pubsubMsg.SubjectID.Prefix()
+	if !supportedPrefix(subjectPrefix) {
+		m.Logger.Debugw("ignoring msg, not a supported prefix", zap.String("subject-prefix", subjectPrefix))
+		return nil
 	}
 
-	lbID := urn.ResourceID.String()
-	if err = m.updateConfigToLatest(lbID); err != nil {
-		m.Logger.Errorw("failed to update haproxy config", zap.String("loadbalancer.id", lbID), zap.Error(err))
-		return err
+	switch pubsubMsg.EventType {
+	case eventTypeCreate:
+		fallthrough
+	case eventTypeUpdate:
+		targetLoadBalancerID, err := getTargetLoadBalancerID(&pubsubMsg)
+		if err != nil {
+			m.Logger.Errorw("failed to get target loadbalancer id", zap.Error(err))
+			return err
+		}
+
+		// drop msg, if not targeted for this lb
+		if targetLoadBalancerID.String() != m.ManagedLBID {
+			m.Logger.Debugw("ignoring msg, not targeted for this lb", zap.String("loadbalancer-id", m.ManagedLBID))
+			return nil
+		}
+
+		// todo - @rizzza - requires lbapi graph client
+		m.Logger.Warn("lbapi graph client is not implemented yet to update haproxy config")
+
+		if false {
+			if err := m.updateConfigToLatest(targetLoadBalancerID.String()); err != nil {
+				m.Logger.Errorw("failed to update haproxy config",
+					zap.String("loadbalancer.id", targetLoadBalancerID.String()),
+					zap.Error(err))
+
+				return err
+			}
+		}
+
+		if err := m.NatsClient.Ack(msg); err != nil {
+			m.Logger.Errorw("failed to ack msg", zap.Error(err), zap.String("subjectID", pubsubMsg.SubjectID.String()))
+			return err
+		}
+	default:
+		m.Logger.Debugw("ignoring msg, not a create or update event", zap.String("event-type", pubsubMsg.EventType))
 	}
 
 	return nil
@@ -124,7 +182,7 @@ func (m Manager) processMsg(msg *pubsub.Message) error {
 // updateConfigToLatest update the haproxy cfg to either baseline or one requested from lbapi with optional lbID param
 func (m *Manager) updateConfigToLatest(lbID ...string) error {
 	if len(lbID) > 1 {
-		return errInvalidLBID
+		return errLoadBalancerIDParamInvalid
 	}
 
 	m.Logger.Info("updating the config")
@@ -136,9 +194,8 @@ func (m *Manager) updateConfigToLatest(lbID ...string) error {
 	}
 
 	if len(lbID) == 1 {
-		// requested a lb id, query lbapi
-		// get desired state
-		lbResp, err := m.LBClient.GetLoadBalancer(m.Context, lbID[0])
+		// get desired state from lbapi
+		lbResp, err := m.LBClient.GetLoadBalancer(m.Context, m.ManagedLBID)
 		if err != nil {
 			return err
 		}
