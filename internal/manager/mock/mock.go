@@ -4,27 +4,24 @@ import (
 	"context"
 
 	"github.com/nats-io/nats.go"
+
 	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
 )
 
 // LBAPIClient mock client
 type LBAPIClient struct {
-	DoGetLoadBalancer func(ctx context.Context, id string) (*lbapi.LoadBalancerResponse, error)
-	DoGetPool         func(ctx context.Context, id string) (*lbapi.PoolResponse, error)
+	DoGetLoadBalancer func(ctx context.Context, id string) (*lbapi.GetLoadBalancer, error)
 }
 
-func (c LBAPIClient) GetLoadBalancer(ctx context.Context, id string) (*lbapi.LoadBalancerResponse, error) {
+func (c LBAPIClient) GetLoadBalancer(ctx context.Context, id string) (*lbapi.GetLoadBalancer, error) {
 	return c.DoGetLoadBalancer(ctx, id)
-}
-
-func (c LBAPIClient) GetPool(ctx context.Context, id string) (*lbapi.PoolResponse, error) {
-	return c.DoGetPool(ctx, id)
 }
 
 // DataplaneAPIClient mock client
 type DataplaneAPIClient struct {
-	DoPostConfig func(ctx context.Context, config string) error
-	DoAPIIsReady func(ctx context.Context) bool
+	DoPostConfig  func(ctx context.Context, config string) error
+	DoCheckConfig func(ctx context.Context, config string) error
+	DoAPIIsReady  func(ctx context.Context) bool
 }
 
 func (c *DataplaneAPIClient) PostConfig(ctx context.Context, config string) error {
@@ -33,6 +30,10 @@ func (c *DataplaneAPIClient) PostConfig(ctx context.Context, config string) erro
 
 func (c DataplaneAPIClient) APIIsReady(ctx context.Context) bool {
 	return c.DoAPIIsReady(ctx)
+}
+
+func (c DataplaneAPIClient) CheckConfig(ctx context.Context, config string) error {
+	return c.DoCheckConfig(ctx, config)
 }
 
 // NatsClient mock client

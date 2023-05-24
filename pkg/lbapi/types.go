@@ -1,43 +1,79 @@
 package lbapi
 
-type Origin struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	IPAddress string `json:"origin_target"`
-	Disabled  bool   `json:"origin_disabled"`
-	Port      int64  `json:"port"`
+type OriginNode struct {
+	ID         string
+	Name       string
+	Target     string
+	PortNumber int64
+	Active     bool
+}
+
+type OriginEdges struct {
+	Node OriginNode
+}
+
+type Origins struct {
+	Edges []OriginEdges
 }
 
 type Pool struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Origins []Origin `json:"origins"`
+	ID       string
+	Name     string
+	Protocol string
+	Origins  Origins
 }
 
-type Port struct {
-	AddressFamily string   `json:"address_family"`
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Port          int64    `json:"port"`
-	Pools         []string `json:"pools"`
+type PortNode struct {
+	ID     string
+	Name   string
+	Number int64
+	Pools  []Pool
+}
+
+type PortEdges struct {
+	Node PortNode
+}
+
+type Ports struct {
+	Edges []PortEdges
 }
 
 type LoadBalancer struct {
-	ID    string `json:"id"`
-	Ports []Port `json:"ports"`
+	ID    string
+	Name  string
+	Ports Ports
 }
 
-type v1ResponseMetaData struct {
-	Version string `json:"version"`
-	Kind    string `json:"kind"`
+type GetLoadBalancer struct {
+	LoadBalancer LoadBalancer `graphql:"loadBalancer(id: $id)"`
 }
 
-type LoadBalancerResponse struct {
-	v1ResponseMetaData
-	LoadBalancer LoadBalancer `json:"load_balancer"`
-}
-
-type PoolResponse struct {
-	v1ResponseMetaData
-	Pool Pool `json:"pool"`
-}
+// Readable version of the above:
+// type GetLoadBalancer struct {
+// 	LoadBalancer struct {
+// 		ID    string
+// 		Name  string
+// 		Ports struct {
+// 			Edges []struct {
+// 				Node struct {
+// 					Name   string
+// 					Number int64
+// 					Pools  []struct {
+// 						Name     string
+// 						Protocol string
+// 						Origins  struct {
+// 							Edges []struct {
+// 								Node struct {
+// 									Name       string
+// 									Target     string
+// 									PortNumber int64
+// 									Active     bool
+// 								}
+// 							}
+// 						}
+// 					}
+// 				}
+// 			}
+// 		}
+// 	} `graphql:"loadBalancer(id: $id)"`
+// }

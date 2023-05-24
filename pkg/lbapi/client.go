@@ -2,132 +2,44 @@ package lbapi
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
-	"time"
 
-	"github.com/hashicorp/go-retryablehttp"
+	"github.com/shurcooL/graphql"
+	"go.infratographer.com/x/gidx"
 )
 
-const (
-	apiVersion           = "v1"
-	clientTimeoutSeconds = 5
-)
-
-// HTTPClient interface
-type HTTPClient interface {
-	Do(req *http.Request) (*http.Response, error)
+// GQLClient is an interface for a graphql client
+type GQLClient interface {
+	Query(ctx context.Context, q interface{}, variables map[string]interface{}) error
 }
 
 // Client creates a new lb api client against a specific endpoint
 type Client struct {
-	client  HTTPClient
-	baseURL string
+	client GQLClient
 }
 
 // NewClient creates a new lb api client
-func NewClient(url string, opts ...func(*Client)) *Client {
-	// default retryable http client
-	retryCli := retryablehttp.NewClient()
-	retryCli.RetryMax = 3
-	retryCli.HTTPClient.Timeout = time.Second * time.Duration(clientTimeoutSeconds)
-	retryCli.Logger = nil
-
-	c := &Client{
-		baseURL: url,
-		client:  retryCli.HTTPClient,
-	}
-
-	for _, opt := range opts {
-		opt(c)
-	}
-
-	return c
-}
-
-// WithHTTPClient inject your specific http client
-func WithHTTPClient(httpClient *http.Client) func(*Client) {
-	return func(c *Client) {
-		c.client = httpClient
+func NewClient(url string) *Client {
+	return &Client{
+		client: graphql.NewClient(url, &http.Client{}),
 	}
 }
 
 // GetLoadBalancer returns a load balancer by id
-func (c Client) GetLoadBalancer(ctx context.Context, id string) (*LoadBalancerResponse, error) {
-	lb := &LoadBalancerResponse{}
-	url := fmt.Sprintf("%s/%s/loadbalancers/%s", c.baseURL, apiVersion, id)
-
-	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (c *Client) GetLoadBalancer(ctx context.Context, id string) (*GetLoadBalancer, error) {
+	_, err := gidx.Parse(id)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := c.client.Do(req.Request)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		if err := json.NewDecoder(resp.Body).Decode(lb); err != nil {
-			return nil, newError(errDecodeLB, err)
-		}
-	case http.StatusNotFound:
-		return nil, ErrLBHTTPNotfound
-	case http.StatusUnauthorized:
-		return nil, ErrLBHTTPUnauthorized
-	case http.StatusInternalServerError:
-		return nil, ErrLBHTTPError
-	default:
-		b, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, errReadResponse
-		}
-
-		return nil, fmt.Errorf("%s: %w", fmt.Sprintf("StatusCode (%d) - %s ", resp.StatusCode, string(b)), ErrLBHTTPError)
+	vars := map[string]interface{}{
+		"id": id,
 	}
 
-	return lb, nil
-}
-
-// GetPool returns a load balancer pool  by id
-func (c Client) GetPool(ctx context.Context, id string) (*PoolResponse, error) {
-	pool := &PoolResponse{}
-	url := fmt.Sprintf("%s/%s/loadbalancers/pools/%s", c.baseURL, apiVersion, id)
-
-	req, err := retryablehttp.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
+	var lb GetLoadBalancer
+	if err := c.client.Query(ctx, &lb, vars); err != nil {
 		return nil, err
 	}
 
-	resp, err := c.client.Do(req.Request)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-		if err := json.NewDecoder(resp.Body).Decode(pool); err != nil {
-			return nil, newError(errDecodeLB, err)
-		}
-	case http.StatusNotFound:
-		return nil, ErrLBHTTPNotfound
-	case http.StatusUnauthorized:
-		return nil, ErrLBHTTPUnauthorized
-	case http.StatusInternalServerError:
-		return nil, ErrLBHTTPError
-	default:
-		b, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, errReadResponse
-		}
-
-		return nil, fmt.Errorf("%s: %w", fmt.Sprintf("StatusCode (%d) - %s ", resp.StatusCode, string(b)), ErrLBHTTPError)
-	}
-
-	return pool, nil
+	return &lb, nil
 }
