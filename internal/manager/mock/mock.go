@@ -3,8 +3,6 @@ package mock
 import (
 	"context"
 
-	"github.com/nats-io/nats.go"
-
 	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
 )
 
@@ -36,31 +34,21 @@ func (c DataplaneAPIClient) CheckConfig(ctx context.Context, config string) erro
 	return c.DoCheckConfig(ctx, config)
 }
 
-// NatsClient mock client
-type NatsClient struct {
-	DoConnect   func() error
+// Subscriber mock client
+type Subscriber struct {
 	DoClose     func() error
 	DoSubscribe func(subject string) error
 	DoListen    func() error
-	DoAck       func(msg *nats.Msg) error
 }
 
-func (c *NatsClient) Connect() error {
-	return c.DoConnect()
+func (s *Subscriber) Close() error {
+	return s.DoClose()
 }
 
-func (c *NatsClient) Close() error {
-	return c.DoClose()
+func (s *Subscriber) Subscribe(subject string) error {
+	return s.DoSubscribe(subject)
 }
 
-func (c *NatsClient) Subscribe(subject string) error {
-	return c.DoSubscribe(subject)
-}
-
-func (c *NatsClient) Listen() error {
-	return c.DoListen()
-}
-
-func (c *NatsClient) Ack(msg *nats.Msg) error {
-	return c.DoAck(msg)
+func (s *Subscriber) Listen() error {
+	return s.DoListen()
 }

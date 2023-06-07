@@ -2,21 +2,20 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	parser "github.com/haproxytech/config-parser/v4"
 	"github.com/haproxytech/config-parser/v4/options"
 	"github.com/haproxytech/config-parser/v4/types"
-	"github.com/nats-io/nats.go"
 
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/dataplaneapi"
 	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
 
-	"go.infratographer.com/x/gidx"
-	"go.infratographer.com/x/pubsubx"
+	"go.infratographer.com/x/events"
 	"go.uber.org/zap"
+
+	"github.com/ThreeDotsLabs/watermill/message"
 )
 
 var (
@@ -34,11 +33,9 @@ type dataPlaneAPI interface {
 	APIIsReady(ctx context.Context) bool
 }
 
-type natsClient interface {
-	Connect() error
+type eventSubscriber interface {
 	Listen() error
-	Ack(msg *nats.Msg) error
-	Subscribe(subject string) error
+	Subscribe(topic string) error
 	Close() error
 }
 
@@ -46,19 +43,31 @@ type natsClient interface {
 type Manager struct {
 	Context         context.Context
 	Logger          *zap.SugaredLogger
-	NatsClient      natsClient
+	Subscriber      eventSubscriber
 	DataPlaneClient dataPlaneAPI
 	LBClient        lbAPI
 	ManagedLBID     string
 	BaseCfgPath     string
 
-	// primarily for testing
+	// currentConfig for unit testing
 	currentConfig string
 }
 
 // Run subscribes to a NATS subject and updates the haproxy config via dataplaneapi
 func (m *Manager) Run() error {
 	m.Logger.Info("Starting manager")
+
+	if m.DataPlaneClient == nil {
+		m.Logger.Fatal("dataplane api is not initialized")
+	}
+
+	if m.LBClient == nil {
+		m.Logger.Fatal("loadbalancer api client is not initialized")
+	}
+
+	if m.Subscriber == nil {
+		m.Logger.Fatal("pubsub subscriber client is not initialized")
+	}
 
 	// wait until the Data Plane API is running
 	if err := m.waitForDataPlaneReady(dataPlaneAPIRetryLimit, dataPlaneAPIRetrySleep); err != nil {
@@ -70,111 +79,57 @@ func (m *Manager) Run() error {
 		m.Logger.Errorw("failed to initialize the config", zap.Error(err))
 	}
 
-	// listen for nats messages on subject(s)
-	if err := m.NatsClient.Listen(); err != nil {
+	// listen for event messages on subject(s)
+	if err := m.Subscriber.Listen(); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-const (
-	subjectPrefixLoadBalancer     = "loadbal"
-	subjectPrefixLoadBalancerPort = "loadprt"
-
-	eventTypeCreate = "create"
-	eventTypeUpdate = "update"
-)
-
-// supportedPrefix returns true if the subject prefix is supported by this manager
-func supportedPrefix(prefix string) bool {
-	switch prefix {
-	case subjectPrefixLoadBalancer:
-		fallthrough
-	case subjectPrefixLoadBalancerPort:
+// loadbalancerTargeted returns true if this ChangeMessage is targeted to the
+// loadbalancerID the manager is configured to act on
+func (m Manager) loadbalancerTargeted(msg *events.ChangeMessage) bool {
+	if msg.SubjectID.String() == m.ManagedLBID {
 		return true
-	default:
-		return false
-	}
-}
-
-// getTargetLoadBalancerID returns the loadbalancer id from the message,
-// whether it is the SubjectID, or one of the AdditionalSubjectIds
-func getTargetLoadBalancerID(msg *pubsubx.ChangeMessage) (gidx.PrefixedID, error) {
-	var lbID gidx.PrefixedID
-
-	if msg.SubjectID.Prefix() == subjectPrefixLoadBalancer {
-		lbID = msg.SubjectID
 	} else {
 		for _, subject := range msg.AdditionalSubjectIDs {
-			if subject.Prefix() == subjectPrefixLoadBalancer {
-				lbID = subject
+			if subject.String() == m.ManagedLBID {
+				return true
 			}
 		}
 	}
 
-	if lbID.String() == "" {
-		return "", errLoadbalancerIDNotFound
-	}
-
-	// check if a valid gidx
-	lbID, err := gidx.Parse(lbID.String())
-	if err != nil {
-		return "", err
-	}
-
-	return lbID, nil
+	return false
 }
 
 // ProcessMsg message handler
-func (m Manager) ProcessMsg(msg *nats.Msg) error {
-	pubsubMsg := pubsubx.ChangeMessage{}
-	if err := json.Unmarshal(msg.Data, &pubsubMsg); err != nil {
+func (m *Manager) ProcessMsg(msg *message.Message) error {
+	changeMsg, err := events.UnmarshalChangeMessage(msg.Payload)
+	if err != nil {
 		m.Logger.Errorw("failed to process data in msg", zap.Error(err))
 		return err
 	}
 
-	subjectPrefix := pubsubMsg.SubjectID.Prefix()
-	if !supportedPrefix(subjectPrefix) {
-		m.Logger.Debugw("ignoring msg, not a supported prefix", zap.String("subject-prefix", subjectPrefix))
-		return nil
-	}
-
-	switch pubsubMsg.EventType {
-	case eventTypeCreate:
+	switch events.ChangeType(changeMsg.EventType) {
+	case events.CreateChangeType:
 		fallthrough
-	case eventTypeUpdate:
-		targetLoadBalancerID, err := getTargetLoadBalancerID(&pubsubMsg)
-		if err != nil {
-			m.Logger.Errorw("failed to get target loadbalancer id", zap.Error(err))
-			return err
-		}
-
+	case events.UpdateChangeType:
 		// drop msg, if not targeted for this lb
-		if targetLoadBalancerID.String() != m.ManagedLBID {
+		if !m.loadbalancerTargeted(&changeMsg) {
 			m.Logger.Debugw("ignoring msg, not targeted for this lb", zap.String("loadbalancer-id", m.ManagedLBID))
 			return nil
 		}
 
-		// todo - @rizzza - requires lbapi graph client
-		m.Logger.Warn("lbapi graph client is not implemented yet to update haproxy config")
+		if err := m.updateConfigToLatest(m.ManagedLBID); err != nil {
+			m.Logger.Errorw("failed to update haproxy config",
+				zap.String("loadbalancer.id", m.ManagedLBID),
+				zap.Error(err))
 
-		if false {
-			if err := m.updateConfigToLatest(targetLoadBalancerID.String()); err != nil {
-				m.Logger.Errorw("failed to update haproxy config",
-					zap.String("loadbalancer.id", targetLoadBalancerID.String()),
-					zap.Error(err))
-
-				return err
-			}
-		}
-
-		if err := m.NatsClient.Ack(msg); err != nil {
-			m.Logger.Errorw("failed to ack msg", zap.Error(err), zap.String("subjectID", pubsubMsg.SubjectID.String()))
 			return err
 		}
 	default:
-		m.Logger.Debugw("ignoring msg, not a create or update event", zap.String("event-type", pubsubMsg.EventType))
+		m.Logger.Debugw("ignoring msg, not a create or update event", zap.String("event-type", changeMsg.EventType))
 	}
 
 	return nil
@@ -247,7 +202,7 @@ func mergeConfig(cfg parser.Parser, lb *lbapi.GetLoadBalancer) (parser.Parser, e
 		}
 
 		if err := cfg.Insert(parser.Frontends, p.Node.ID, "bind", types.Bind{
-			// TODO AddressFamily
+			// TODO AddressFamily?
 			Path: fmt.Sprintf("%s@:%d", "ipv4", p.Node.Number)}); err != nil {
 			return nil, newAttrError(errFrontendBindFailure, err)
 		}

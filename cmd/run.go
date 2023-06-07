@@ -2,17 +2,19 @@ package cmd
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"os"
 	"os/signal"
-	"strings"
 
+	"go.infratographer.com/x/events"
+	"go.infratographer.com/x/gidx"
+	"go.uber.org/zap"
+
+	"go.infratographer.com/loadbalancer-manager-haproxy/internal/config"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/dataplaneapi"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/manager"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/pubsub"
 	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
-	"go.infratographer.com/x/gidx"
-	"go.uber.org/zap"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -30,17 +32,8 @@ var runCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(runCmd)
 
-	runCmd.PersistentFlags().String("nats-url", "", "NATS server connection url")
-	viperBindFlag("nats.url", runCmd.PersistentFlags().Lookup("nats-url"))
-
-	runCmd.PersistentFlags().String("nats-creds", "", "Path to the file containing the NATS credentials")
-	viperBindFlag("nats.creds", runCmd.PersistentFlags().Lookup("nats-creds"))
-
-	runCmd.PersistentFlags().String("nats-subject-prefix", "com.infratographer", "prefix for NATS subjects")
-	viperBindFlag("nats.subject-prefix", runCmd.PersistentFlags().Lookup("nats-subject-prefix"))
-
-	runCmd.PersistentFlags().StringSlice("nats-subjects", []string{"changes.*.load-balancer"}, "NATS subjects to subscribe to")
-	viperBindFlag("nats.subjects", runCmd.PersistentFlags().Lookup("nats-subjects"))
+	runCmd.PersistentFlags().StringSlice("events-topics", []string{}, "event topics to subscribe to")
+	viperBindFlag("events.topics", runCmd.PersistentFlags().Lookup("events-topics"))
 
 	runCmd.PersistentFlags().String("dataplane-user-name", "haproxy", "DataplaneAPI user name")
 	viperBindFlag("dataplane.user.name", runCmd.PersistentFlags().Lookup("dataplane-user-name"))
@@ -59,6 +52,8 @@ func init() {
 
 	runCmd.PersistentFlags().String("loadbalancer-id", "", "Loadbalancer ID to act on event changes")
 	viperBindFlag("loadbalancer.id", runCmd.PersistentFlags().Lookup("loadbalancer-id"))
+
+	events.MustViperFlagsForSubscriber(viper.GetViper(), runCmd.PersistentFlags())
 }
 
 func run(cmdCtx context.Context, v *viper.Viper) error {
@@ -77,42 +72,37 @@ func run(cmdCtx context.Context, v *viper.Viper) error {
 	}()
 
 	mgr := &manager.Manager{
-		Context:     ctx,
-		Logger:      logger,
-		ManagedLBID: viper.GetString("loadbalancer.id"),
-		BaseCfgPath: viper.GetString("haproxy.config.base"),
+		Context:         ctx,
+		Logger:          logger,
+		DataPlaneClient: dataplaneapi.NewClient(viper.GetString("dataplane.url")),
+		LBClient:        lbapi.NewClient(viper.GetString("loadbalancerapi.url")),
+		ManagedLBID:     viper.GetString("loadbalancer.id"),
+		BaseCfgPath:     viper.GetString("haproxy.config.base"),
 	}
 
 	// init other components
-	mgr.DataPlaneClient = dataplaneapi.NewClient(viper.GetString("dataplane.url"))
-	mgr.LBClient = lbapi.NewClient(viper.GetString("loadbalancerapi.url"))
+	subscriber, err := pubsub.NewSubscriber(
+		ctx,
+		config.AppConfig.Events.Subscriber,
+		pubsub.WithMsgHandler(mgr.ProcessMsg))
 
-	// setup, connect to nats and subscribe to subjects
-	mgr.NatsClient = pubsub.NewNatsClient(ctx, viper.GetString("nats.url"),
-		pubsub.WithUserCredentials(viper.GetString("nats.creds")),
-		pubsub.WithLogger(logger),
-		pubsub.WithMsgHandler(mgr.ProcessMsg),
-	)
-
-	if err := mgr.NatsClient.Connect(); err != nil {
-		logger.Error("failed to connect to nats server", zap.Error(err))
+	if err != nil {
+		logger.Errorw("failed to create subscriber", zap.Error(err))
 		return err
 	}
 
-	subjects := viper.GetStringSlice("nats.subjects")
-	prefix := viper.GetString("nats.subject-prefix")
+	mgr.Subscriber = subscriber
 
-	for _, subject := range subjects {
-		prefixedSubjectQueue := fmt.Sprintf("%s.%s", prefix, subject)
-		if err := mgr.NatsClient.Subscribe(prefixedSubjectQueue); err != nil {
-			logger.Errorw("failed to subscribe to queue ", zap.String("subject", prefixedSubjectQueue))
+	for _, topic := range viper.GetStringSlice("events.topics") {
+		if err := mgr.Subscriber.Subscribe(topic); err != nil {
+			logger.Errorw("failed to subscribe to changes topic", zap.String("topic", topic), zap.Error(err))
 			return err
 		}
 	}
 
 	defer func() {
-		if err := mgr.NatsClient.Close(); err != nil {
-			mgr.Logger.Errorw("failed to shutdown nats client", zap.Error(err))
+		if err := mgr.Subscriber.Close(); err != nil {
+			mgr.Logger.Errorw("failed to shutdown events subscriber", zap.Error(err))
 		}
 	}()
 
@@ -125,41 +115,41 @@ func run(cmdCtx context.Context, v *viper.Viper) error {
 
 // validateMandatoryFlags collects the mandatory flag validation
 func validateMandatoryFlags() error {
-	errs := []string{}
+	errs := []error{}
 
-	if viper.GetString("nats.url") == "" {
-		errs = append(errs, ErrNATSURLRequired.Error())
+	if viper.GetString("events.subscriber.url") == "" {
+		errs = append(errs, ErrSubscriberURLRequired)
 	}
 
-	if viper.GetString("nats.creds") == "" {
-		errs = append(errs, ErrNATSAuthRequired.Error())
+	if viper.GetString("events.subscriber.prefix") == "" {
+		errs = append(errs, ErrSubscriberPrefixRequired)
 	}
 
-	if viper.GetString("nats.subject-prefix") == "" {
-		errs = append(errs, ErrNATSSubjectPrefixRequired.Error())
+	if len(viper.GetStringSlice("events.topics")) < 1 {
+		errs = append(errs, ErrSubscriberTopicsRequired)
 	}
 
 	if viper.GetString("haproxy.config.base") == "" {
-		errs = append(errs, ErrHAProxyBaseConfigRequired.Error())
+		errs = append(errs, ErrHAProxyBaseConfigRequired)
 	}
 
 	if viper.GetString("loadbalancerapi.url") == "" {
-		errs = append(errs, ErrLBAPIURLRequired.Error())
+		errs = append(errs, ErrLBAPIURLRequired)
 	}
 
 	if viper.GetString("loadbalancer.id") == "" {
-		errs = append(errs, ErrLBIDRequired.Error())
-	}
-
-	// check if the loadbalancer id is a valid gidx
-	_, err := gidx.Parse(viper.GetString("loadbalancer.id"))
-	if err != nil {
-		errs = append(errs, ErrLBIDInvalid.Error())
+		errs = append(errs, ErrLBIDRequired)
+	} else {
+		// check if the loadbalancer id is a valid gidx
+		_, err := gidx.Parse(viper.GetString("loadbalancer.id"))
+		if err != nil {
+			errs = append(errs, ErrLBIDInvalid)
+		}
 	}
 
 	if len(errs) == 0 {
 		return nil
 	}
 
-	return fmt.Errorf(strings.Join(errs, "\n")) //nolint:goerr113
+	return errors.Join(errs...) //nolint:goerr113
 }
