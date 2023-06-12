@@ -5,8 +5,9 @@ services:
       context: .
       dockerfile: Dockerfile
     command: sleep infinity
-    depends_on:
-      - nats-init
+    environment:
+      LOADBALANCER_MANAGER_HAPROXY_EVENTS_SUBSCRIBER_NATS_CREDSFILE: /etc/nats-auth/manager.creds
+      LOADBALANCER_MANAGER_HAPROXY_EVENTS_SUBSCRIBER_PREFIX: com.infratographer
     volumes:
       - ..:/workspaces:cached
       - nats-auth:/etc/nats-auth
@@ -53,6 +54,7 @@ services:
         "nats",
         "stream",
         "--server=nats",
+        "--creds=/etc/nats-auth/manager.creds",
         "add",
         "loadbalancer-manager-haproxy",
         "--subjects=com.infratographer.>",
@@ -70,6 +72,8 @@ services:
         "--deny-delete",
         "--deny-purge"
       ]
+    volumes:
+      - nats-auth:/etc/nats-auth
 
 volumes:
   nats-auth:
