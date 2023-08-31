@@ -3,8 +3,11 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
+	"time"
 
 	"go.infratographer.com/x/events"
 	"go.infratographer.com/x/gidx"
@@ -56,6 +59,9 @@ func init() {
 	runCmd.PersistentFlags().String("loadbalancer-id", "", "Loadbalancer ID to act on event changes")
 	viperx.MustBindFlag(viper.GetViper(), "loadbalancer.id", runCmd.PersistentFlags().Lookup("loadbalancer-id"))
 
+	runCmd.PersistentFlags().Uint64("max-msg-process-attempts", 0, "maxiumum number of attempts at processing an event message")
+	viperx.MustBindFlag(viper.GetViper(), "max-msg-process-attempts", runCmd.PersistentFlags().Lookup("max-msg-process-attempts"))
+
 	events.MustViperFlags(viper.GetViper(), runCmd.PersistentFlags(), appName)
 	oauth2x.MustViperFlags(viper.GetViper(), runCmd.Flags())
 }
@@ -106,6 +112,11 @@ func run(cmdCtx context.Context, v *viper.Viper) error {
 		mgr.LBClient = lbapi.NewClient(viper.GetString("loadbalancerapi.url"))
 	}
 
+	// generate a random queuegroup name
+	// this is to prevent multiple instances of this service from receiving the same message
+	// and processing it
+	config.AppConfig.Events.NATS.QueueGroup = generateQueueGroupName()
+
 	events, err := events.NewConnection(config.AppConfig.Events, events.WithLogger(logger))
 	if err != nil {
 		logger.Fatalw("failed to create events connection", "error", err)
@@ -117,6 +128,7 @@ func run(cmdCtx context.Context, v *viper.Viper) error {
 		events,
 		pubsub.WithMsgHandler(mgr.ProcessMsg),
 		pubsub.WithLogger(logger),
+		pubsub.WithMaxMsgProcessAttempts(viper.GetUint64("max-msg-process-attempts")),
 	)
 
 	mgr.Subscriber = subscriber
@@ -129,9 +141,12 @@ func run(cmdCtx context.Context, v *viper.Viper) error {
 	}
 
 	defer func() {
-		if err := mgr.Subscriber.Close(); err != nil {
-			mgr.Logger.Errorw("failed to shutdown events", zap.Error(err))
-		}
+		const shutdownTimeout = 10 * time.Second
+		ctx, cancel := context.WithTimeout(ctx, shutdownTimeout)
+
+		defer cancel()
+
+		_ = events.Shutdown(ctx)
 	}()
 
 	if err := mgr.Run(); err != nil {
@@ -166,4 +181,19 @@ func validateMandatoryFlags() error {
 	}
 
 	return errors.Join(errs...) //nolint:goerr113
+}
+
+// generateQueueGroupName generates a random queue group name with prefix lbmanager-haproxy-
+func generateQueueGroupName() string {
+	const rlen = 10
+
+	alphaNum := []rune("abcdefghijklmnopqrstuvwxyz1234567890")
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	b := make([]rune, rlen)
+
+	for i := range b {
+		b[i] = alphaNum[r.Intn(len(alphaNum))]
+	}
+
+	return fmt.Sprintf("lbmanager-haproxy-%s-", string(b))
 }
