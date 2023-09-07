@@ -19,9 +19,10 @@ import (
 	"go.infratographer.com/x/gidx"
 	"go.infratographer.com/x/testing/eventtools"
 
+	lbapi "go.infratographer.com/load-balancer-api/pkg/client"
+
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/manager/mock"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/pubsub"
-	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
 )
 
 const (
@@ -32,7 +33,7 @@ const (
 func TestMergeConfig(t *testing.T) {
 	MergeConfigTests := []struct {
 		name                string
-		testInput           lbapi.GetLoadBalancer
+		testInput           lbapi.LoadBalancer
 		expectedCfgFilename string
 	}{
 		{"ssh service one pool", mergeTestData1, "lb-ex-1-exp.cfg"},
@@ -73,7 +74,7 @@ func TestUpdateConfigToLatest(t *testing.T) {
 		t.Parallel()
 
 		mockLBAPI := &mock.LBAPIClient{
-			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.GetLoadBalancer, error) {
+			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.LoadBalancer, error) {
 				return nil, fmt.Errorf("failure") // nolint:goerr113
 			},
 		}
@@ -126,12 +127,10 @@ func TestUpdateConfigToLatest(t *testing.T) {
 		t.Parallel()
 
 		mockLBAPI := &mock.LBAPIClient{
-			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.GetLoadBalancer, error) {
-				return &lbapi.GetLoadBalancer{
-					LoadBalancer: lbapi.LoadBalancer{
-						ID:    "loadbal-test",
-						Ports: lbapi.Ports{},
-					},
+			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.LoadBalancer, error) {
+				return &lbapi.LoadBalancer{
+					ID:    "loadbal-test",
+					Ports: lbapi.Ports{},
 				}, nil
 			},
 		}
@@ -170,50 +169,48 @@ func TestUpdateConfigToLatest(t *testing.T) {
 		t.Parallel()
 
 		mockLBAPI := &mock.LBAPIClient{
-			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.GetLoadBalancer, error) {
-				return &lbapi.GetLoadBalancer{
-					LoadBalancer: lbapi.LoadBalancer{
-						ID: "loadbal-test",
-						Ports: lbapi.Ports{
-							Edges: []lbapi.PortEdges{
-								{
-									Node: lbapi.PortNode{
-										ID:     "loadprt-test",
-										Name:   "ssh-service",
-										Number: 22,
-										Pools: []lbapi.Pool{
-											{
-												ID:       "loadpol-test",
-												Name:     "ssh-service-a",
-												Protocol: "tcp",
-												Origins: lbapi.Origins{
-													Edges: []lbapi.OriginEdges{
-														{
-															Node: lbapi.OriginNode{
-																ID:         "loadogn-test1",
-																Name:       "svr1-2222",
-																Target:     "1.2.3.4",
-																PortNumber: 2222,
-																Active:     true,
-															},
+			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.LoadBalancer, error) {
+				return &lbapi.LoadBalancer{
+					ID: "loadbal-test",
+					Ports: lbapi.Ports{
+						Edges: []lbapi.PortEdges{
+							{
+								Node: lbapi.PortNode{
+									ID:     "loadprt-test",
+									Name:   "ssh-service",
+									Number: 22,
+									Pools: []lbapi.Pool{
+										{
+											ID:       "loadpol-test",
+											Name:     "ssh-service-a",
+											Protocol: "tcp",
+											Origins: lbapi.Origins{
+												Edges: []lbapi.OriginEdges{
+													{
+														Node: lbapi.OriginNode{
+															ID:         "loadogn-test1",
+															Name:       "svr1-2222",
+															Target:     "1.2.3.4",
+															PortNumber: 2222,
+															Active:     true,
 														},
-														{
-															Node: lbapi.OriginNode{
-																ID:         "loadogn-test2",
-																Name:       "svr1-222",
-																Target:     "1.2.3.4",
-																PortNumber: 222,
-																Active:     true,
-															},
+													},
+													{
+														Node: lbapi.OriginNode{
+															ID:         "loadogn-test2",
+															Name:       "svr1-222",
+															Target:     "1.2.3.4",
+															PortNumber: 222,
+															Active:     true,
 														},
-														{
-															Node: lbapi.OriginNode{
-																ID:         "loadogn-test3",
-																Name:       "svr2",
-																Target:     "4.3.2.1",
-																PortNumber: 2222,
-																Active:     false,
-															},
+													},
+													{
+														Node: lbapi.OriginNode{
+															ID:         "loadogn-test3",
+															Name:       "svr2",
+															Target:     "4.3.2.1",
+															PortNumber: 2222,
+															Active:     false,
 														},
 													},
 												},
@@ -386,11 +383,9 @@ func TestProcessMsg(t *testing.T) {
 		}
 
 		mockLBAPI := &mock.LBAPIClient{
-			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.GetLoadBalancer, error) {
-				return &lbapi.GetLoadBalancer{
-					LoadBalancer: lbapi.LoadBalancer{
-						ID: "loadbal-managedbythisprocess",
-					},
+			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.LoadBalancer, error) {
+				return &lbapi.LoadBalancer{
+					ID: "loadbal-managedbythisprocess",
 				}, nil
 			},
 		}
@@ -443,50 +438,48 @@ func TestEventsIntegration(t *testing.T) {
 		}
 
 		mockLBAPI := &mock.LBAPIClient{
-			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.GetLoadBalancer, error) {
-				return &lbapi.GetLoadBalancer{
-					LoadBalancer: lbapi.LoadBalancer{
-						ID: "loadbal-managedbythisprocess",
-						Ports: lbapi.Ports{
-							Edges: []lbapi.PortEdges{
-								{
-									Node: lbapi.PortNode{
-										ID:     "loadprt-test",
-										Name:   "ssh-service",
-										Number: 22,
-										Pools: []lbapi.Pool{
-											{
-												ID:       "loadpol-test",
-												Name:     "ssh-service-a",
-												Protocol: "tcp",
-												Origins: lbapi.Origins{
-													Edges: []lbapi.OriginEdges{
-														{
-															Node: lbapi.OriginNode{
-																ID:         "loadogn-test1",
-																Name:       "svr1-2222",
-																Target:     "1.2.3.4",
-																PortNumber: 2222,
-																Active:     true,
-															},
+			DoGetLoadBalancer: func(ctx context.Context, id string) (*lbapi.LoadBalancer, error) {
+				return &lbapi.LoadBalancer{
+					ID: "loadbal-managedbythisprocess",
+					Ports: lbapi.Ports{
+						Edges: []lbapi.PortEdges{
+							{
+								Node: lbapi.PortNode{
+									ID:     "loadprt-test",
+									Name:   "ssh-service",
+									Number: 22,
+									Pools: []lbapi.Pool{
+										{
+											ID:       "loadpol-test",
+											Name:     "ssh-service-a",
+											Protocol: "tcp",
+											Origins: lbapi.Origins{
+												Edges: []lbapi.OriginEdges{
+													{
+														Node: lbapi.OriginNode{
+															ID:         "loadogn-test1",
+															Name:       "svr1-2222",
+															Target:     "1.2.3.4",
+															PortNumber: 2222,
+															Active:     true,
 														},
-														{
-															Node: lbapi.OriginNode{
-																ID:         "loadogn-test2",
-																Name:       "svr1-222",
-																Target:     "1.2.3.4",
-																PortNumber: 222,
-																Active:     true,
-															},
+													},
+													{
+														Node: lbapi.OriginNode{
+															ID:         "loadogn-test2",
+															Name:       "svr1-222",
+															Target:     "1.2.3.4",
+															PortNumber: 222,
+															Active:     true,
 														},
-														{
-															Node: lbapi.OriginNode{
-																ID:         "loadogn-test3",
-																Name:       "svr2",
-																Target:     "4.3.2.1",
-																PortNumber: 2222,
-																Active:     false,
-															},
+													},
+													{
+														Node: lbapi.OriginNode{
+															ID:         "loadogn-test3",
+															Name:       "svr2",
+															Target:     "4.3.2.1",
+															PortNumber: 2222,
+															Active:     false,
 														},
 													},
 												},
@@ -553,51 +546,49 @@ func PublishTestMessage(t *testing.T, ctx context.Context, eventsConn events.Con
 	return testMsg
 }
 
-var mergeTestData1 = lbapi.GetLoadBalancer{
-	LoadBalancer: lbapi.LoadBalancer{
-		ID:   "loadbal-test",
-		Name: "test",
-		Ports: lbapi.Ports{
-			Edges: []lbapi.PortEdges{
-				{
-					Node: lbapi.PortNode{
-						// TODO - @rizzza - AddressFamily?
-						ID:     "loadprt-test",
-						Name:   "ssh-service",
-						Number: 22,
-						Pools: []lbapi.Pool{
-							{
-								ID:       "loadpol-test",
-								Name:     "ssh-service-a",
-								Protocol: "tcp",
-								Origins: lbapi.Origins{
-									Edges: []lbapi.OriginEdges{
-										{
-											Node: lbapi.OriginNode{
-												ID:         "loadogn-test1",
-												Name:       "svr1-2222",
-												Target:     "1.2.3.4",
-												PortNumber: 2222,
-												Active:     true,
-											},
+var mergeTestData1 = lbapi.LoadBalancer{
+	ID:   "loadbal-test",
+	Name: "test",
+	Ports: lbapi.Ports{
+		Edges: []lbapi.PortEdges{
+			{
+				Node: lbapi.PortNode{
+					// TODO - @rizzza - AddressFamily?
+					ID:     "loadprt-test",
+					Name:   "ssh-service",
+					Number: 22,
+					Pools: []lbapi.Pool{
+						{
+							ID:       "loadpol-test",
+							Name:     "ssh-service-a",
+							Protocol: "tcp",
+							Origins: lbapi.Origins{
+								Edges: []lbapi.OriginEdges{
+									{
+										Node: lbapi.OriginNode{
+											ID:         "loadogn-test1",
+											Name:       "svr1-2222",
+											Target:     "1.2.3.4",
+											PortNumber: 2222,
+											Active:     true,
 										},
-										{
-											Node: lbapi.OriginNode{
-												ID:         "loadogn-test2",
-												Name:       "svr1-222",
-												Target:     "1.2.3.4",
-												PortNumber: 222,
-												Active:     true,
-											},
+									},
+									{
+										Node: lbapi.OriginNode{
+											ID:         "loadogn-test2",
+											Name:       "svr1-222",
+											Target:     "1.2.3.4",
+											PortNumber: 222,
+											Active:     true,
 										},
-										{
-											Node: lbapi.OriginNode{
-												ID:         "loadogn-test3",
-												Name:       "svr2",
-												Target:     "4.3.2.1",
-												PortNumber: 2222,
-												Active:     false,
-											},
+									},
+									{
+										Node: lbapi.OriginNode{
+											ID:         "loadogn-test3",
+											Name:       "svr2",
+											Target:     "4.3.2.1",
+											PortNumber: 2222,
+											Active:     false,
 										},
 									},
 								},
@@ -610,69 +601,67 @@ var mergeTestData1 = lbapi.GetLoadBalancer{
 	},
 }
 
-var mergeTestData2 = lbapi.GetLoadBalancer{
-	LoadBalancer: lbapi.LoadBalancer{
-		ID:   "loadbal-test",
-		Name: "test",
-		Ports: lbapi.Ports{
-			Edges: []lbapi.PortEdges{
-				{
-					Node: lbapi.PortNode{
-						// TODO - @rizzza - AddressFamily?
-						ID:     "loadprt-test",
-						Name:   "ssh-service-a",
-						Number: 22,
-						Pools: []lbapi.Pool{
-							{
-								ID:       "loadpol-test",
-								Name:     "ssh-service-a",
-								Protocol: "tcp",
-								Origins: lbapi.Origins{
-									Edges: []lbapi.OriginEdges{
-										{
-											Node: lbapi.OriginNode{
-												ID:         "loadogn-test1",
-												Name:       "svr1-2222",
-												Target:     "1.2.3.4",
-												PortNumber: 2222,
-												Active:     true,
-											},
+var mergeTestData2 = lbapi.LoadBalancer{
+	ID:   "loadbal-test",
+	Name: "test",
+	Ports: lbapi.Ports{
+		Edges: []lbapi.PortEdges{
+			{
+				Node: lbapi.PortNode{
+					// TODO - @rizzza - AddressFamily?
+					ID:     "loadprt-test",
+					Name:   "ssh-service-a",
+					Number: 22,
+					Pools: []lbapi.Pool{
+						{
+							ID:       "loadpol-test",
+							Name:     "ssh-service-a",
+							Protocol: "tcp",
+							Origins: lbapi.Origins{
+								Edges: []lbapi.OriginEdges{
+									{
+										Node: lbapi.OriginNode{
+											ID:         "loadogn-test1",
+											Name:       "svr1-2222",
+											Target:     "1.2.3.4",
+											PortNumber: 2222,
+											Active:     true,
 										},
-										{
-											Node: lbapi.OriginNode{
-												ID:         "loadogn-test2",
-												Name:       "svr1-222",
-												Target:     "1.2.3.4",
-												PortNumber: 222,
-												Active:     true,
-											},
+									},
+									{
+										Node: lbapi.OriginNode{
+											ID:         "loadogn-test2",
+											Name:       "svr1-222",
+											Target:     "1.2.3.4",
+											PortNumber: 222,
+											Active:     true,
 										},
-										{
-											Node: lbapi.OriginNode{
-												ID:         "loadogn-test3",
-												Name:       "svr2",
-												Target:     "4.3.2.1",
-												PortNumber: 2222,
-												Active:     false,
-											},
+									},
+									{
+										Node: lbapi.OriginNode{
+											ID:         "loadogn-test3",
+											Name:       "svr2",
+											Target:     "4.3.2.1",
+											PortNumber: 2222,
+											Active:     false,
 										},
 									},
 								},
 							},
-							{
-								ID:       "loadpol-test2",
-								Name:     "ssh-service-b",
-								Protocol: "tcp",
-								Origins: lbapi.Origins{
-									Edges: []lbapi.OriginEdges{
-										{
-											Node: lbapi.OriginNode{
-												ID:         "loadogn-test4",
-												Name:       "svr1-2222",
-												Target:     "7.8.9.0",
-												PortNumber: 2222,
-												Active:     true,
-											},
+						},
+						{
+							ID:       "loadpol-test2",
+							Name:     "ssh-service-b",
+							Protocol: "tcp",
+							Origins: lbapi.Origins{
+								Edges: []lbapi.OriginEdges{
+									{
+										Node: lbapi.OriginNode{
+											ID:         "loadogn-test4",
+											Name:       "svr1-2222",
+											Target:     "7.8.9.0",
+											PortNumber: 2222,
+											Active:     true,
 										},
 									},
 								},
@@ -685,33 +674,31 @@ var mergeTestData2 = lbapi.GetLoadBalancer{
 	},
 }
 
-var mergeTestData3 = lbapi.GetLoadBalancer{
-	LoadBalancer: lbapi.LoadBalancer{
-		ID:   "loadbal-test",
-		Name: "http/https",
-		Ports: lbapi.Ports{
-			Edges: []lbapi.PortEdges{
-				{
-					Node: lbapi.PortNode{
-						// TODO - @rizzza - AddressFamily?
-						ID:     "loadprt-testhttp",
-						Name:   "http",
-						Number: 80,
-						Pools: []lbapi.Pool{
-							{
-								ID:       "loadpol-test",
-								Name:     "ssh-service-a",
-								Protocol: "tcp",
-								Origins: lbapi.Origins{
-									Edges: []lbapi.OriginEdges{
-										{
-											Node: lbapi.OriginNode{
-												ID:         "loadogn-test1",
-												Name:       "svr1",
-												Target:     "3.1.4.1",
-												PortNumber: 80,
-												Active:     true,
-											},
+var mergeTestData3 = lbapi.LoadBalancer{
+	ID:   "loadbal-test",
+	Name: "http/https",
+	Ports: lbapi.Ports{
+		Edges: []lbapi.PortEdges{
+			{
+				Node: lbapi.PortNode{
+					// TODO - @rizzza - AddressFamily?
+					ID:     "loadprt-testhttp",
+					Name:   "http",
+					Number: 80,
+					Pools: []lbapi.Pool{
+						{
+							ID:       "loadpol-test",
+							Name:     "ssh-service-a",
+							Protocol: "tcp",
+							Origins: lbapi.Origins{
+								Edges: []lbapi.OriginEdges{
+									{
+										Node: lbapi.OriginNode{
+											ID:         "loadogn-test1",
+											Name:       "svr1",
+											Target:     "3.1.4.1",
+											PortNumber: 80,
+											Active:     true,
 										},
 									},
 								},
@@ -719,27 +706,27 @@ var mergeTestData3 = lbapi.GetLoadBalancer{
 						},
 					},
 				},
-				{
-					Node: lbapi.PortNode{
-						// TODO - @rizzza - AddressFamily?
-						ID:     "loadprt-testhttps",
-						Name:   "https",
-						Number: 443,
-						Pools: []lbapi.Pool{
-							{
-								ID:       "loadpol-test",
-								Name:     "ssh-service-a",
-								Protocol: "tcp",
-								Origins: lbapi.Origins{
-									Edges: []lbapi.OriginEdges{
-										{
-											Node: lbapi.OriginNode{
-												ID:         "loadogn-test2",
-												Name:       "svr1",
-												Target:     "3.1.4.1",
-												PortNumber: 443,
-												Active:     true,
-											},
+			},
+			{
+				Node: lbapi.PortNode{
+					// TODO - @rizzza - AddressFamily?
+					ID:     "loadprt-testhttps",
+					Name:   "https",
+					Number: 443,
+					Pools: []lbapi.Pool{
+						{
+							ID:       "loadpol-test",
+							Name:     "ssh-service-a",
+							Protocol: "tcp",
+							Origins: lbapi.Origins{
+								Edges: []lbapi.OriginEdges{
+									{
+										Node: lbapi.OriginNode{
+											ID:         "loadogn-test2",
+											Name:       "svr1",
+											Target:     "3.1.4.1",
+											PortNumber: 443,
+											Active:     true,
 										},
 									},
 								},

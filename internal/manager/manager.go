@@ -9,7 +9,7 @@ import (
 	"github.com/haproxytech/config-parser/v4/options"
 	"github.com/haproxytech/config-parser/v4/types"
 
-	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
+	lbapi "go.infratographer.com/load-balancer-api/pkg/client"
 
 	"go.infratographer.com/x/events"
 	"go.infratographer.com/x/gidx"
@@ -22,7 +22,7 @@ var (
 )
 
 type lbAPI interface {
-	GetLoadBalancer(ctx context.Context, id string) (*lbapi.GetLoadBalancer, error)
+	GetLoadBalancer(ctx context.Context, id string) (*lbapi.LoadBalancer, error)
 }
 
 type dataPlaneAPI interface {
@@ -188,8 +188,8 @@ func (m *Manager) updateConfigToLatest() error {
 }
 
 // mergeConfig takes the response from lb api, merges with the base haproxy config and returns it
-func mergeConfig(cfg parser.Parser, lb *lbapi.GetLoadBalancer) (parser.Parser, error) {
-	for _, p := range lb.LoadBalancer.Ports.Edges {
+func mergeConfig(cfg parser.Parser, lb *lbapi.LoadBalancer) (parser.Parser, error) {
+	for _, p := range lb.Ports.Edges {
 		// create port
 		if err := cfg.SectionsCreate(parser.Frontends, p.Node.ID); err != nil {
 			return nil, newLabelError(p.Node.ID, errFrontendSectionLabelFailure, err)

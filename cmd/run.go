@@ -16,11 +16,12 @@ import (
 
 	"go.infratographer.com/x/oauth2x"
 
+	lbapi "go.infratographer.com/load-balancer-api/pkg/client"
+
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/config"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/dataplaneapi"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/manager"
 	"go.infratographer.com/loadbalancer-manager-haproxy/internal/pubsub"
-	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"

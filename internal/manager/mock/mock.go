@@ -4,15 +4,15 @@ import (
 	"context"
 	"time"
 
-	"go.infratographer.com/loadbalancer-manager-haproxy/pkg/lbapi"
+	lbapi "go.infratographer.com/load-balancer-api/pkg/client"
 )
 
 // LBAPIClient mock client
 type LBAPIClient struct {
-	DoGetLoadBalancer func(ctx context.Context, id string) (*lbapi.GetLoadBalancer, error)
+	DoGetLoadBalancer func(ctx context.Context, id string) (*lbapi.LoadBalancer, error)
 }
 
-func (c LBAPIClient) GetLoadBalancer(ctx context.Context, id string) (*lbapi.GetLoadBalancer, error) {
+func (c LBAPIClient) GetLoadBalancer(ctx context.Context, id string) (*lbapi.LoadBalancer, error) {
 	return c.DoGetLoadBalancer(ctx, id)
 }
 
